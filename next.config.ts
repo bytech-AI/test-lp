@@ -1,15 +1,13 @@
-import type { NextConfig } from "next";
-
-const nextConfig: NextConfig = {
+const nextConfig = {
   async rewrites() {
     return [
       {
-        source: "/blog",
-        destination: "http://wp.ai-hack-portal.com/blog",
+        source: '/blog',
+        destination: 'http://118.27.100.221/blog',
       },
       {
-        source: "/blog/:path*",
-        destination: "http://wp.ai-hack-portal.com/blog/:path*",
+        source: '/blog/:path*',
+        destination: 'http://118.27.100.221/blog/:path*',
       },
     ];
   },
