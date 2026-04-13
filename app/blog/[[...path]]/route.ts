@@ -1,7 +1,22 @@
 import { NextRequest } from "next/server";
+import { Agent } from "undici";
 
 const WP_IP = "118.27.100.221";
 const WP_HOST = "ai-hack-portal.com";
+
+const tlsAgent = new Agent({
+  connect: {
+    rejectUnauthorized: false,
+  },
+});
+
+async function wpFetch(url: string, options: RequestInit) {
+  return fetch(url, {
+    ...options,
+    // @ts-expect-error undici dispatcher for TLS skip
+    dispatcher: tlsAgent,
+  });
+}
 
 async function proxyToWP(request: NextRequest, method: string, wpPath: string) {
   const url = new URL(request.url);
@@ -27,8 +42,6 @@ async function proxyToWP(request: NextRequest, method: string, wpPath: string) {
     method,
     headers,
     redirect: "manual",
-    // @ts-expect-error Node.js fetch option to skip TLS verification
-    rejectUnauthorized: false,
   };
 
   if (method === "POST") {
@@ -36,21 +49,19 @@ async function proxyToWP(request: NextRequest, method: string, wpPath: string) {
     fetchOptions.body = await request.arrayBuffer();
   }
 
-  let res = await fetch(target, fetchOptions);
+  let res = await wpFetch(target, fetchOptions);
 
-  // Handle redirects manually to keep Host header pointing to WP
+  // Handle redirects manually to keep requests going to WP IP
   if ([301, 302, 307, 308].includes(res.status)) {
     const location = res.headers.get("location");
     if (location) {
       const redirectUrl = location
         .replace(`https://${WP_HOST}`, `https://${WP_IP}`)
         .replace(`http://${WP_HOST}`, `https://${WP_IP}`);
-      res = await fetch(redirectUrl, {
+      res = await wpFetch(redirectUrl, {
         method: method === "POST" && [307, 308].includes(res.status) ? "POST" : "GET",
         headers,
         redirect: "manual",
-        // @ts-expect-error Node.js fetch option
-        rejectUnauthorized: false,
       });
     }
   }
@@ -61,7 +72,6 @@ async function proxyToWP(request: NextRequest, method: string, wpPath: string) {
   res.headers.forEach((value, key) => {
     const lower = key.toLowerCase();
     if (!["transfer-encoding", "connection", "content-encoding"].includes(lower)) {
-      // Rewrite location headers to use our domain
       if (lower === "location") {
         responseHeaders.set(key, value.replace(`https://${WP_HOST}`, "").replace(`http://${WP_HOST}`, ""));
       } else {
