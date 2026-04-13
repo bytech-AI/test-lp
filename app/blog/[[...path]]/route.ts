@@ -1,27 +1,15 @@
 import { NextRequest } from "next/server";
-import { Agent } from "undici";
 
 const WP_IP = "118.27.100.221";
 const WP_HOST = "ai-hack-portal.com";
 
-const tlsAgent = new Agent({
-  connect: {
-    rejectUnauthorized: false,
-  },
-});
-
-async function wpFetch(url: string, options: RequestInit) {
-  return fetch(url, {
-    ...options,
-    // @ts-expect-error undici dispatcher for TLS skip
-    dispatcher: tlsAgent,
-  });
-}
-
 async function proxyToWP(request: NextRequest, method: string, wpPath: string) {
   const url = new URL(request.url);
   const queryString = url.search;
-  const target = `https://${WP_IP}${wpPath}${queryString}`;
+
+  // Use HTTP to avoid SSL cert mismatch with IP address
+  // nginx will try to redirect to HTTPS, so we follow manually back to IP
+  let target = `http://${WP_IP}${wpPath}${queryString}`;
 
   const headers: Record<string, string> = {
     Host: WP_HOST,
@@ -38,32 +26,35 @@ async function proxyToWP(request: NextRequest, method: string, wpPath: string) {
   const cookie = request.headers.get("cookie");
   if (cookie) headers["Cookie"] = cookie;
 
-  const fetchOptions: RequestInit = {
+  if (method === "POST") {
+    headers["Content-Type"] = request.headers.get("content-type") || "";
+  }
+
+  let res = await fetch(target, {
     method,
     headers,
     redirect: "manual",
-  };
+    body: method === "POST" ? await request.arrayBuffer() : undefined,
+  });
 
-  if (method === "POST") {
-    headers["Content-Type"] = request.headers.get("content-type") || "";
-    fetchOptions.body = await request.arrayBuffer();
-  }
-
-  let res = await wpFetch(target, fetchOptions);
-
-  // Handle redirects manually to keep requests going to WP IP
-  if ([301, 302, 307, 308].includes(res.status)) {
+  // nginx redirects HTTP -> HTTPS with Location: https://ai-hack-portal.com/...
+  // We need to rewrite that to http://IP and retry
+  let retries = 0;
+  while ([301, 302, 307, 308].includes(res.status) && retries < 3) {
     const location = res.headers.get("location");
-    if (location) {
-      const redirectUrl = location
-        .replace(`https://${WP_HOST}`, `https://${WP_IP}`)
-        .replace(`http://${WP_HOST}`, `https://${WP_IP}`);
-      res = await wpFetch(redirectUrl, {
-        method: method === "POST" && [307, 308].includes(res.status) ? "POST" : "GET",
-        headers,
-        redirect: "manual",
-      });
-    }
+    if (!location) break;
+
+    // Rewrite any redirect back to our IP with HTTP
+    target = location
+      .replace(`https://${WP_HOST}`, `http://${WP_IP}`)
+      .replace(`http://${WP_HOST}`, `http://${WP_IP}`);
+
+    res = await fetch(target, {
+      method: method === "POST" && [307, 308].includes(res.status) ? "POST" : "GET",
+      headers,
+      redirect: "manual",
+    });
+    retries++;
   }
 
   const body = await res.arrayBuffer();
@@ -73,7 +64,13 @@ async function proxyToWP(request: NextRequest, method: string, wpPath: string) {
     const lower = key.toLowerCase();
     if (!["transfer-encoding", "connection", "content-encoding"].includes(lower)) {
       if (lower === "location") {
-        responseHeaders.set(key, value.replace(`https://${WP_HOST}`, "").replace(`http://${WP_HOST}`, ""));
+        // Rewrite WP domain references back to our public URL
+        responseHeaders.set(
+          key,
+          value
+            .replace(`https://${WP_HOST}`, "")
+            .replace(`http://${WP_HOST}`, "")
+        );
       } else {
         responseHeaders.set(key, value);
       }
