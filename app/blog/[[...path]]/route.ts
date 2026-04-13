@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 
-const WP_ORIGIN = "https://118.27.100.221";
+const WP_ORIGIN = "http://118.27.100.221";
 
 export async function GET(
   request: NextRequest,
@@ -12,6 +12,7 @@ export async function GET(
   const queryString = url.search;
 
   const res = await fetch(`${WP_ORIGIN}${wpPath}${queryString}`, {
+    redirect: "follow",
     headers: {
       Host: "ai-hack-portal.com",
       "X-Forwarded-For": request.headers.get("x-forwarded-for") || "",
