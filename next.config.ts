@@ -3,11 +3,11 @@ const nextConfig = {
     return [
       {
         source: '/blog',
-        destination: 'https://wp.ai-hack-portal.com/blog',
+        destination: 'https://118.27.100.221/blog',
       },
       {
         source: '/blog/:path*',
-        destination: 'https://wp.ai-hack-portal.com/blog/:path*',
+        destination: 'https://118.27.100.221/blog/:path*',
       },
     ];
   },
